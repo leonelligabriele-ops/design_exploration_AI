@@ -1,5 +1,6 @@
 import { useRef, useCallback } from 'react';
 import { useTreeStore, STAGES, STAGE_LIST } from '../store/tree.js';
+import { SourceChip } from './SourceChip.jsx';
 
 export function NodeCard({ node, selected, scale }) {
   const select = useTreeStore(s => s.select);
@@ -7,6 +8,16 @@ export function NodeCard({ node, selected, scale }) {
   const deleteNode = useTreeStore(s => s.deleteNode);
   const updateNodePosition = useTreeStore(s => s.updateNodePosition);
   const setStage = useTreeStore(s => s.setStage);
+  const liveDataSource = useTreeStore(s => s.dataSource);
+  const liveSensorName = useTreeStore(s => s.sensorName);
+
+  // Before first generation: chip reflects the LIVE global source (what the
+  // sketch will be connected to). After generation: chip reflects the
+  // snapshotted node.source (what the sketch was built for).
+  const chipSource = node.code
+    ? node.source
+    : (liveDataSource !== 'none' ? liveDataSource : null);
+  const chipSensorName = node.code ? node.sensorName : liveSensorName;
 
   const dragRef = useRef(null);
   const movedRef = useRef(false);
@@ -62,6 +73,11 @@ export function NodeCard({ node, selected, scale }) {
     >
       <div className="node-title">{node.title}</div>
       <div className="node-preview">{preview}</div>
+      {chipSource && (
+        <div className="node-source">
+          <SourceChip source={chipSource} shape={node.shape} sensorName={chipSensorName} compact />
+        </div>
+      )}
       <div className="node-actions">
         <span className={`stage-badge stage-${stage}`} onClick={cycleStage} title="Tap to change stage">
           {stageInfo.label}

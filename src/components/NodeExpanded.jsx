@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useTreeStore, STAGES } from '../store/tree.js';
 import { SketchPad } from './SketchPad.jsx';
+import { SourceChip } from './SourceChip.jsx';
 import { predict } from '../datalayer/modelInference.js';
 
 // Error handler — injected FIRST so it catches all script errors.
@@ -87,6 +88,15 @@ export function NodeExpanded({ node }) {
   const whatElse = useTreeStore(s => s.whatElse);
   const sendKeepChange = useTreeStore(s => s.sendKeepChange);
   const multiGenerate = useTreeStore(s => s.multiGenerate);
+  const setNodeShape = useTreeStore(s => s.setNodeShape);
+  const liveDataSource = useTreeStore(s => s.dataSource);
+  const liveSensorName = useTreeStore(s => s.sensorName);
+
+  // Before generation: chip follows the live global source. After: frozen.
+  const chipSource = node.code
+    ? node.source
+    : (liveDataSource !== 'none' ? liveDataSource : null);
+  const chipSensorName = node.code ? node.sensorName : liveSensorName;
 
   const textareaRef = useRef(null);
   const iframeRef = useRef(null);
@@ -277,6 +287,12 @@ export function NodeExpanded({ node }) {
       <div className="ne-header">
         <span className="theme-dot" style={{ background: stageInfo.border }} />
         <span className="ne-title">{node.title}</span>
+        <SourceChip
+          source={chipSource}
+          shape={node.shape}
+          sensorName={chipSensorName}
+          onShapeChange={(s) => setNodeShape(node.id, s)}
+        />
         {node.code && (
           <>
             <button
@@ -363,38 +379,46 @@ export function NodeExpanded({ node }) {
       <div className="ne-main">
         {/* Prompt bar */}
         <div className="ne-prompt-bar">
-          <textarea
-            ref={textareaRef}
-            className="ne-prompt"
-            placeholder="What should this app do?"
-            value={node.prompt}
-            onChange={e => updatePrompt(node.id, e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={2}
-          />
-          <button
-            className="ne-ask"
-            onClick={handleAskQuestions}
-            disabled={node.loading || !node.prompt.trim()}
-            title="Ask me clarifying questions first"
-          >
-            ?
-          </button>
-          <button
-            className="ne-explore"
-            onClick={handleExplore}
-            disabled={node.loading || !node.prompt.trim()}
-            title="Generate 3 different variations as sibling nodes"
-          >
-            Explore variations
-          </button>
-          <button
-            className="ne-send"
-            onClick={handleSend}
-            disabled={node.loading || !node.prompt.trim()}
-          >
-            {node.loading ? '...' : 'Generate'}
-          </button>
+          {node.questionPrompt && (
+            <div className="ne-question-seed">
+              <span className="ne-question-seed-label">You asked</span>
+              <div className="ne-question-seed-text">{node.questionPrompt}</div>
+            </div>
+          )}
+          <div className="ne-prompt-row">
+            <textarea
+              ref={textareaRef}
+              className="ne-prompt"
+              placeholder={node.questionPrompt ? 'Type your answer here…' : 'What should this app do?'}
+              value={node.prompt}
+              onChange={e => updatePrompt(node.id, e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={2}
+            />
+            <button
+              className="ne-ask"
+              onClick={handleAskQuestions}
+              disabled={node.loading || !node.prompt.trim()}
+              title="Ask me clarifying questions first"
+            >
+              ?
+            </button>
+            <button
+              className="ne-explore"
+              onClick={handleExplore}
+              disabled={node.loading || !node.prompt.trim()}
+              title="Generate 3 different variations as sibling nodes"
+            >
+              Explore variations
+            </button>
+            <button
+              className="ne-send"
+              onClick={handleSend}
+              disabled={node.loading || !node.prompt.trim()}
+            >
+              {node.loading ? '...' : 'Generate'}
+            </button>
+          </div>
         </div>
 
         {/* Sketch bar — upload or draw a wireframe */}
@@ -429,7 +453,7 @@ export function NodeExpanded({ node }) {
           {showResponseText && (
             <div className="ne-response-text">
               {node.response}
-              <div className="ne-response-hint">Add your answers to the prompt above, then click Generate</div>
+              <div className="ne-response-hint">Type your answer in the box above, then click Generate</div>
             </div>
           )}
           {iframeHtml ? (

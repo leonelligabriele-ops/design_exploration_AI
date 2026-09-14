@@ -88,12 +88,42 @@ export const STAGES = {
 
 export const STAGE_LIST = ['sketch', 'explore', 'refine'];
 
-function getDataSourceContext(source, csvColumns, sensorName, sensorParserType, sensorDecoderDescription) {
+function getDataSourceContext(source, csvColumns, sensorName, sensorParserType, sensorDecoderDescription, nodeShape, csvRowCount) {
   if (source === 'mediapipe') {
     return 'The user has a LIVE WEBCAM connected via MediaPipe Pose. Real-time skeleton data is streaming now. The bioframe.joints object contains 33 named landmarks including: nose, left_shoulder, right_shoulder, left_elbow, right_elbow, left_wrist, right_wrist, left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle, left_heel, right_heel, left_foot_index, right_foot_index. Each joint has {x, y, z, confidence} where x/y are 0-1 normalized screen coordinates. The data is already flowing — generate code that uses it immediately, do not show a "waiting" state. IMPORTANT: confidence values fluctuate — use a low threshold like 0.3 or skip the confidence check entirely. Do not filter out frames aggressively.';
   }
   if (source === 'csv') {
     const cols = csvColumns.length ? `\nThe CSV columns are: ${csvColumns.join(', ')}` : '';
+    if (nodeShape === 'dataset') {
+      const rowCountLine = csvRowCount ? `\nNumber of rows: ${csvRowCount}` : '';
+      return `A CSV file is loaded and you are in DATASET mode — you have the ENTIRE dataset upfront, NOT a stream. IGNORE any earlier instructions about frame.row for CSV; this is different.${cols}${rowCountLine}
+
+The bioframe payload contains both streaming and dataset fields, but for DATASET mode you read ONLY these:
+- frame.source === 'csv'
+- frame.data.rows — array of ALL rows as objects, e.g. frame.data.rows[0].ColumnName
+- frame.data.columns — array of column names
+- frame.data.rowCount — total number of rows
+
+The frame will be re-delivered at 10Hz (the stream keeps running in the background), but the dataset payload is stable. Guard against reprocessing by checking a flag on first call, e.g.:
+  window.onBioframe = function(frame) {
+    if (window.__loaded) return;
+    window.__loaded = true;
+    const rows = frame.data.rows;
+    // ... set up your visualization / sonification / animation ...
+  };
+
+DO NOT read frame.row, frame.rowIndex, or treat this as a stream — even though those fields exist in the payload, they are not for you.
+
+You decide how to present the data. Options include but are NOT limited to:
+- Static overviews: charts, heatmaps, calendar views, small multiples
+- Animated unfolding: walk through rows over time with setInterval or requestAnimationFrame to show a slow progression
+- Sonification: map values to pitch, rhythm, timbre using the Web Audio API (new AudioContext() is available — create it inside a user gesture handler if browsers block autoplay)
+- Interactive exploration: scrubbing, filtering, zooming, drill-down, hover-to-reveal
+- Ambient / generative: data as seed for visual texture or audio drone
+- Physical metaphors: something that breathes, grows, decays, accumulates, erodes
+
+Do NOT default to a bar chart or a dashboard. The user wants a novel interaction with this dataset. Be imaginative about output modality — visual, audio, motion, or a combination. If sound is involved, include a visible "Start" button to unlock the AudioContext.`;
+    }
     return `A CSV file is loaded and streaming row-by-row. The data is already flowing — generate code that uses it immediately.${cols}
 
 For CSV data, the frame object is different from webcam:
@@ -102,7 +132,8 @@ For CSV data, the frame object is different from webcam:
 - frame.rowIndex — current row number
 - frame.row values are auto-typed (numbers are numbers, strings are strings)
 Use frame.row.ColumnName to access data. Column names are EXACTLY as listed above — use them verbatim.
-Do NOT use frame.joints for CSV data — use frame.row directly.`;
+Do NOT use frame.joints for CSV data — use frame.row directly.
+(The frame also contains a frame.data field with the full dataset; ignore it in this mode.)`;
   }
   if (source === 'bluetooth') {
     const tag = sensorName || 'sensor';
@@ -203,15 +234,17 @@ export const useTreeStore = create((set, get) => ({
   dataFlowing: false,
   frameCount: 0,
   csvColumns: [],
+  csvRowCount: 0,
   sensorName: '',  // friendly name of the committed BLE characteristic, e.g. 'HR'
   sensorParserType: '', // 'heart_rate' | 'int16' | 'uint16' | 'float32' | 'raw' | 'ai'
   sensorDecoderDescription: '', // AI-supplied one-liner when parserType is 'ai'
 
   // Data layer actions
-  setDataSource: (source) => set({ dataSource: source, dataFlowing: false, frameCount: 0, csvColumns: [], sensorName: '', sensorParserType: '', sensorDecoderDescription: '' }),
+  setDataSource: (source) => set({ dataSource: source, dataFlowing: false, frameCount: 0, csvColumns: [], csvRowCount: 0, sensorName: '', sensorParserType: '', sensorDecoderDescription: '' }),
   setDataFlowing: (flowing) => set({ dataFlowing: flowing }),
   incrementFrame: () => set(s => ({ frameCount: s.frameCount + 1 })),
   setCsvColumns: (cols) => set({ csvColumns: cols }),
+  setCsvRowCount: (n) => set({ csvRowCount: n }),
   setSensorName: (name) => set({ sensorName: name }),
   setSensorParserType: (t) => set({ sensorParserType: t }),
   setSensorDecoderDescription: (d) => set({ sensorDecoderDescription: d }),
@@ -241,7 +274,7 @@ export const useTreeStore = create((set, get) => ({
         id, parentId: null,
         x: 200 + roots.length * 280, y: 60,
         title: 'New idea', prompt: '', response: '', code: '', sketch: null,
-        loading: false, stage: 'sketch',
+        loading: false, stage: 'sketch', shape: 'timeseries',
       }],
       selectedId: id,
     }));
@@ -258,11 +291,16 @@ export const useTreeStore = create((set, get) => ({
         id, parentId,
         x: parent.x + offset, y: parent.y + 240,
         title: 'What if…', prompt: '', response: '', code: parent.code || '', sketch: parent.sketch || null,
-        loading: false, stage: parent.stage || 'sketch',
+        loading: false, stage: parent.stage || 'sketch', shape: parent.shape || 'timeseries',
+        source: parent.source || null, sensorName: parent.sensorName || null,
       }],
       selectedId: id,
     }));
   },
+
+  setNodeShape: (id, shape) => set(s => ({
+    nodes: s.nodes.map(n => n.id === id ? { ...n, shape } : n),
+  })),
 
   select: (id) => set({ selectedId: id }),
 
@@ -320,10 +358,22 @@ export const useTreeStore = create((set, get) => ({
 
     // Capture previous response before clearing (needed for question→answer flow)
     const previousResponse = node.response;
+    // The prompt that originally triggered a question (if we're mid-Q&A)
+    const pendingQuestion = node.questionPrompt || '';
 
     const title = node.prompt.slice(0, 32) + (node.prompt.length > 32 ? '…' : '');
+    // Snapshot what data source this generation is being built against.
+    // The node's iframe will receive live data of this type, and the AI was
+    // prompted to read that shape. Useful for showing a source chip later.
+    const snapshotSource = state.dataSource !== 'none' ? state.dataSource : null;
+    const snapshotSensorName = state.sensorName || null;
     set(s => ({
-      nodes: s.nodes.map(n => n.id === nodeId ? { ...n, loading: true, title, response: '' } : n),
+      nodes: s.nodes.map(n => n.id === nodeId ? {
+        ...n,
+        loading: true, title, response: '',
+        source: snapshotSource,
+        sensorName: snapshotSensorName,
+      } : n),
     }));
 
     const ancestors = get().getAncestors(nodeId);
@@ -337,17 +387,18 @@ export const useTreeStore = create((set, get) => ({
       return m;
     });
 
-    // If this node had a previous exchange (e.g. question mode → user answering),
-    // include it in the conversation so the AI sees its own questions + the user's answers
-    if (previousResponse && !options.questionMode) {
-      // The previous prompt was already used; include it as context
-      const prevPrompt = node.prompt; // current prompt is the user's answer
-      // We need the *original* prompt that triggered the questions — but it was overwritten.
-      // Instead, just include the AI's previous response as assistant context.
+    // If this node had a previous Q&A exchange, include the original prompt
+    // and the AI's questions so the answer lands in proper conversational context.
+    if (pendingQuestion) {
+      messages.push({ role: 'user', content: pendingQuestion });
+      if (previousResponse) {
+        messages.push({ role: 'assistant', content: previousResponse });
+      }
+    } else if (previousResponse && !options.questionMode) {
       messages.push({ role: 'assistant', content: previousResponse });
     }
     // Tell the AI which data source is active so it generates relevant code
-    const dataContext = getDataSourceContext(state.dataSource, state.csvColumns, state.sensorName, state.sensorParserType, state.sensorDecoderDescription);
+    const dataContext = getDataSourceContext(state.dataSource, state.csvColumns, state.sensorName, state.sensorParserType, state.sensorDecoderDescription, node.shape || 'timeseries', state.csvRowCount);
     const modelContext = getModelContext(state.models);
     const contextParts = [`[Stage: ${stage.toUpperCase()}]`];
     if (dataContext) contextParts.push(dataContext);
@@ -400,14 +451,20 @@ export const useTreeStore = create((set, get) => ({
         const currentNode = get().nodes.find(n => n.id === nodeId);
         const extracted = options.questionMode ? null : extractCode(currentNode?.response || '');
         set(s => ({
-          nodes: s.nodes.map(n =>
-            n.id === nodeId ? {
-              ...n,
-              loading: false,
-              code: extracted || n.code,
-              // In question mode, keep the prompt so context is preserved
-            } : n
-          ),
+          nodes: s.nodes.map(n => {
+            if (n.id !== nodeId) return n;
+            const updates = { loading: false, code: extracted || n.code };
+            if (options.questionMode) {
+              // Move the prompt that triggered questions into questionPrompt,
+              // clear the textarea so the user can type their answer.
+              updates.questionPrompt = n.prompt;
+              updates.prompt = '';
+            } else if (pendingQuestion) {
+              // User just answered — Q&A complete, clear the seed.
+              updates.questionPrompt = '';
+            }
+            return { ...n, ...updates };
+          }),
         }));
       },
       onError: (error) => {
@@ -438,7 +495,8 @@ export const useTreeStore = create((set, get) => ({
         x: node.x + offset, y: node.y + 240,
         title: 'What else…',
         prompt: reframePrompt, response: '', code: '', sketch: null,
-        loading: false, stage: node.stage || 'sketch',
+        loading: false, stage: node.stage || 'sketch', shape: node.shape || 'timeseries',
+        source: node.source || null, sensorName: node.sensorName || null,
       }],
       selectedId: id,
     }));
@@ -467,7 +525,8 @@ export const useTreeStore = create((set, get) => ({
         x: node.x + offset, y: node.y + 240,
         title: 'Refine: ' + (changeText || keepText).slice(0, 24),
         prompt, response: '', code: '', sketch: null,
-        loading: false, stage: node.stage || 'sketch',
+        loading: false, stage: node.stage || 'sketch', shape: node.shape || 'timeseries',
+        source: node.source || null, sensorName: node.sensorName || null,
       }],
       selectedId: id,
     }));
@@ -497,7 +556,8 @@ export const useTreeStore = create((set, get) => ({
         title: 'Variation 2', prompt,
         response: '', code: '',
         sketch: node.sketch || null,
-        loading: false, stage: node.stage || 'sketch',
+        loading: false, stage: node.stage || 'sketch', shape: node.shape || 'timeseries',
+        source: node.source || null, sensorName: node.sensorName || null,
       },
       {
         id: id3, parentId: node.parentId,
@@ -505,7 +565,8 @@ export const useTreeStore = create((set, get) => ({
         title: 'Variation 3', prompt,
         response: '', code: '',
         sketch: node.sketch || null,
-        loading: false, stage: node.stage || 'sketch',
+        loading: false, stage: node.stage || 'sketch', shape: node.shape || 'timeseries',
+        source: node.source || null, sensorName: node.sensorName || null,
       },
     ];
 
@@ -535,7 +596,7 @@ export const useTreeStore = create((set, get) => ({
       const data = JSON.parse(json);
       if (!Array.isArray(data.nodes)) throw new Error('Invalid format');
       set({
-        nodes: data.nodes.map(n => ({ ...n, loading: false, code: n.code || '' })),
+        nodes: data.nodes.map(n => ({ ...n, loading: false, code: n.code || '', shape: n.shape || 'timeseries' })),
         selectedId: null,
         provider: data.provider || 'anthropic',
         ollamaModel: data.ollamaModel || 'qwen3-coder:latest',

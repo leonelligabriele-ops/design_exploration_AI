@@ -17,11 +17,13 @@ export function DataBar() {
   const dataFlowing = useTreeStore(s => s.dataFlowing);
   const frameCount = useTreeStore(s => s.frameCount);
   const csvColumns = useTreeStore(s => s.csvColumns);
+  const csvRowCount = useTreeStore(s => s.csvRowCount);
   const sensorName = useTreeStore(s => s.sensorName);
   const setDataSource = useTreeStore(s => s.setDataSource);
   const setDataFlowing = useTreeStore(s => s.setDataFlowing);
   const incrementFrame = useTreeStore(s => s.incrementFrame);
   const setCsvColumns = useTreeStore(s => s.setCsvColumns);
+  const setCsvRowCount = useTreeStore(s => s.setCsvRowCount);
   const setSensorName = useTreeStore(s => s.setSensorName);
   const setSensorParserType = useTreeStore(s => s.setSensorParserType);
   const setSensorDecoderDescription = useTreeStore(s => s.setSensorDecoderDescription);
@@ -89,13 +91,14 @@ export function DataBar() {
       complete: (results) => {
         const columns = results.meta.fields || [];
         setCsvColumns(columns);
-        startCSV(results.data, columns, null);
+        setCsvRowCount(results.data.length);
+        startCSV(results.data, columns);
         startBroadcast(() => { incrementFrame(); });
         setDataFlowing(true);
       },
       error: (err) => console.error('CSV parse error:', err),
     });
-  }, [setCsvColumns, incrementFrame, setDataFlowing]);
+  }, [setCsvColumns, setCsvRowCount, incrementFrame, setDataFlowing]);
 
   return (
     <div className="data-bar">
@@ -143,7 +146,7 @@ export function DataBar() {
         )}
         {csvColumns.length > 0 && (
           <span className="csv-cols" title={csvColumns.join(', ')}>
-            {csvColumns.length} columns
+            {csvColumns.length} cols{csvRowCount ? ` · ${csvRowCount} rows` : ''}
           </span>
         )}
         {dataSource === 'bluetooth' && sensorName && (
