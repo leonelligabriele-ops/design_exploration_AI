@@ -32,7 +32,7 @@
    ```
    npx wrangler pages secret put OLLAMA_URL --project-name design-exploration-ai
    ```
-   (e.g. `http://tokai.informatik.umu.se:11434`.)
+   (e.g. `http://your-ollama-host:11434`.)
 
 ## Deploy
 

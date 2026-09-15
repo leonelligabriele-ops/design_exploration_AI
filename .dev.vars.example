@@ -9,4 +9,4 @@ ANTHROPIC_KEY=sk-ant-...
 WORKSHOP_CODE=
 
 # Optional: enables /api/ollama/* proxy. Set to your Ollama server URL.
-OLLAMA_URL=http://tokai.informatik.umu.se:11434
+OLLAMA_URL=http://localhost:11434
