@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
+<script src="https://cdn.jsdelivr.net/npm/simple-statistics@7.8.8/dist/simple-statistics.min.js"></script>
+<style>
+  :root { --pico-font-size: 20px; --quiet: #ece5d6; --usual: #b9d7b4; --more: #3f7f4c; --heart: #b8452d; }
+  body { background: #fbfaf6; }
+  main.container { max-width: 620px; padding: 16px 16px 8px; }
+  [role="tablist"] { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 18px; }
+  [role="tab"] { margin: 0; font-size: 18px; }
+  [role="tab"][aria-selected="false"] { --pico-background-color: #fff; --pico-color: #2a2a26; --pico-border-color: #d5d0c4; }
+  article { margin-bottom: 18px; }
+  .steps { font-size: 56px; font-weight: 750; line-height: 1.05; margin: 2px 0 8px; color: #23231f; }
+  .kind { font-size: 22px; margin: 0; }
+  .week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; text-align: center; }
+  .dot { aspect-ratio: 1; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; border: 2px solid #cfc8b8; }
+  .lvl { font-size: 13px; color: #6c6a60; margin-top: 4px; }
+  .q { background: var(--quiet); } .u { background: var(--usual); } .m { background: var(--more); color: #fff; border-color: var(--more); }
+  .cal { display: grid; grid-template-columns: 52px repeat(7, 1fr); gap: 4px; font-size: 13px; }
+  .cal span { height: 24px; border-radius: 5px; }
+  .cal .h { outline: 2.5px solid var(--heart); outline-offset: -2.5px; }
+  .cal .n { background: repeating-linear-gradient(45deg, #ddd 0 3px, #fff 3px 6px); }
+  .cal b { font-weight: 400; color: #6c6a60; font-size: 12px; align-self: center; }
+  .note { border-left: 4px solid var(--heart); padding: 4px 12px; margin: 14px 0 0; font-size: 17px; }
+  small { color: #6c6a60; }
+</style></head>
+<body>
+<main class="container">
+  <p id="empty">Waiting for the watch data…</p>
+  <div id="main" hidden>
+    <div role="tablist">
+      <button role="tab" aria-selected="true" data-view="me">For me</button>
+      <button role="tab" aria-selected="false" data-view="family">Family &amp; physio</button>
+    </div>
+
+    <section id="me">
+      <article>
+        <header id="dayName"></header>
+        <div class="steps" id="steps"></div>
+        <p class="kind" id="kind"></p>
+      </article>
+      <article>
+        <header>This week</header>
+        <div class="week" id="week"></div>
+      </article>
+    </section>
+
+    <section id="family" hidden>
+      <article>
+        <header>Eight weeks, compared with their own usual</header>
+        <div class="cal" id="cal"></div>
+        <p class="note" id="heartNote" hidden></p>
+        <small>Pale: quieter than usual · light green: about usual · dark green: more than usual · red outline: resting heart rate above their normal · striped: watch not worn</small>
+      </article>
+      <article>
+        <header>What helps them move</header>
+        <p id="helps" style="margin:0"></p>
+      </article>
+    </section>
+  </div>
+</main>
+<script>
+const num = (v) => typeof v === 'number' && isFinite(v);
+const ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const LONG = { Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' };
+const dayLong = (d) => new Date(d + 'T00:00').toLocaleDateString('en-GB', { weekday: 'long' });
+const dateShort = (d) => new Date(d + 'T00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-selected', x === b));
+  for (const v of ['me', 'family']) document.getElementById(v).hidden = v !== b.dataset.view;
+});
+
+window.onBioframe = function (frame) {
+  const rows = frame.data.rows;
+  const worn = rows.filter(r => num(r.steps));
+  document.getElementById('empty').hidden = worn.length > 0;
+  document.getElementById('main').hidden = !worn.length;
+  if (!worn.length) return;
+  const usual = ss.median(worn.map(r => r.steps));
+  const level = (s) => !num(s) ? 'n' : s < usual * 0.8 ? 'q' : s > usual * 1.2 ? 'm' : 'u';
+  me(worn, usual, level);
+  family(rows, worn, level);
+};
+
+function me(worn, usual, level) {
+  const d = worn[worn.length - 1];
+  document.getElementById('dayName').textContent = `Yesterday, ${dayLong(d.date)}`;
+  document.getElementById('steps').textContent = `${d.steps.toLocaleString('en-GB')} steps`;
+  document.getElementById('kind').textContent = {
+    m: 'More than on most of your days.',
+    u: 'A good, ordinary day for you.',
+    q: 'A quieter day. Quiet days are part of every week.',
+  }[level(d.steps)];
+  const words = { q: 'quiet', u: 'usual', m: 'more', n: 'no watch' };
+  document.getElementById('week').innerHTML = worn.slice(-7).map(r =>
+    `<div><div class="dot ${level(r.steps)}" title="${r.steps.toLocaleString('en-GB')} steps">${r.weekday[0]}</div><div class="lvl">${words[level(r.steps)]}</div></div>`).join('');
+}
+
+function family(rows, worn, level) {
+  const hrs = worn.map(r => r.resting_heart_rate).filter(num);
+  const hrNormal = ss.median(hrs), spread = ss.medianAbsoluteDeviation(hrs) || 1;
+  const high = (r) => num(r.resting_heart_rate) && r.resting_heart_rate >= hrNormal + 3 * spread;
+  const offset = (new Date(rows[0].date + 'T00:00').getDay() + 6) % 7;
+  let html = '<b></b>' + ORDER.map(d => `<b style="text-align:center">${d}</b>`).join('');
+  const cells = Array(offset).fill('<span></span>').concat(rows.map(r =>
+    `<span class="${level(r.steps)}${high(r) ? ' h' : ''}" title="${r.date}"></span>`));
+  for (let w = 0; w * 7 < cells.length; w++) html += `<b>week ${w + 1}</b>` + cells.slice(w * 7, w * 7 + 7).join('');
+  document.getElementById('cal').innerHTML = html;
+
+  // The longest run of days with a raised resting heart rate, in words.
+  let run = [], best = [];
+  for (const r of worn) { if (high(r)) { run.push(r); if (run.length > best.length) best = [...run]; } else run = []; }
+  if (best.length >= 3) {
+    const steps = ss.mean(best.map(r => r.steps)), hr = ss.mean(best.map(r => r.resting_heart_rate));
+    const n = document.getElementById('heartNote'); n.hidden = false;
+    n.textContent = `From ${dateShort(best[0].date)} to ${dateShort(best[best.length - 1].date)}, resting heart rate was higher than usual ` +
+      `(${Math.round(hr)} instead of ${Math.round(hrNormal)}) and they moved less (${Math.round(steps).toLocaleString('en-GB')} steps a day). ` +
+      `A quieter week with a reason, not a failure.`;
+  }
+  const by = ORDER.map(d => { const v = worn.filter(r => r.weekday === d); return { d, steps: v.length ? ss.mean(v.map(r => r.steps)) : 0, out: v.length ? ss.mean(v.map(r => r.outdoor_minutes || 0)) : 0 }; })
+    .sort((a, b) => b.steps - a.steps).slice(0, 2);
+  document.getElementById('helps').textContent =
+    `${by.map(b => LONG[b.d] + 's').join(' and ')} ` +
+    `are their most active days: about ${Math.round(ss.mean(by.map(b => b.steps))).toLocaleString('en-GB')} steps and ${Math.round(ss.mean(by.map(b => b.out)))} minutes outside. ` +
+    `What happens on those days may be worth asking about.`;
+}
+</script>
+</body></html>

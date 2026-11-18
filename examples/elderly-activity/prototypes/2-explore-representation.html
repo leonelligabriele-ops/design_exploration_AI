@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/p5@1.11.3/lib/p5.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #f4efe4; font-family: Georgia, 'Times New Roman', serif; }
+  #title { position: fixed; left: 24px; top: 18px; color: #3c3a33; pointer-events: none; }
+  #title b { display: block; font-size: 30px; font-weight: normal; }
+  #title span { font-size: 17px; color: #6d685c; }
+</style></head>
+<body>
+<div id="title"><b id="big">Waiting for your watch data…</b><span id="sub"></span></div>
+<script>
+// The person's walking is a journey along one path. Every day moves them
+// forward — a quiet day just a little — so there is no way to fall behind.
+// Days with a longer walk outside get a small leaf beside the path.
+let days = [], total = 0, start = 0;
+const PLAY_MS = 5000;
+
+window.onBioframe = function (frame) {
+  let sum = 0;
+  days = frame.data.rows.filter(r => typeof r.distance_km === 'number').map(r => {
+    sum += r.distance_km;
+    return { at: sum, km: r.distance_km, outside: (r.outdoor_minutes || 0) >= 45, date: r.date };
+  });
+  total = sum;
+  start = performance.now();
+};
+
+function setup() { createCanvas(windowWidth, windowHeight); }
+function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+function mousePressed() { start = performance.now(); }
+
+// A gentle winding road through the whole canvas, as a function of 0..1.
+function road(t) {
+  const rows = 4, top = 120, bottom = height - 50;
+  const r = t * rows, row = min(floor(r), rows - 1), f = r - row;
+  const left = 50, right = width - 50;
+  const x = row % 2 === 0 ? lerp(left, right, f) : lerp(right, left, f);
+  const y = lerp(top, bottom, (row + 0.5 + 0.35 * sin(f * PI)) / rows);
+  return createVector(x, y);
+}
+
+function draw() {
+  background(244, 239, 228);
+  if (!days.length) return;
+  const p = constrain((performance.now() - start) / PLAY_MS, 0, 1);
+  const walked = total * (1 - pow(1 - p, 3));
+  const ahead = total * 1.25;       // the road continues beyond today
+
+  // The road ahead, faint
+  noFill(); stroke(220, 210, 190); strokeWeight(14);
+  beginShape(); for (let i = 0; i <= 200; i++) { const v = road(i / 200); vertex(v.x, v.y); } endShape();
+
+  // The road walked so far
+  stroke(196, 150, 92); strokeWeight(14); strokeCap(ROUND);
+  beginShape(); for (let i = 0; i <= 200 * walked / ahead; i++) { const v = road(i / 200); vertex(v.x, v.y); } endShape();
+
+  // One mark at the end of each day; leaves for longer walks outside
+  for (const d of days) {
+    if (d.at > walked) break;
+    const v = road(d.at / ahead);
+    noStroke(); fill(255, 250, 240); circle(v.x, v.y, 6);
+    if (d.outside) {
+      push(); translate(v.x, v.y - 16); rotate(-0.5); fill(104, 150, 92); ellipse(0, 0, 9, 18); pop();
+    }
+  }
+
+  // The walker, today
+  const me = road(walked / ahead);
+  noStroke(); fill(60, 58, 51); circle(me.x, me.y - 2, 20);
+  fill(244, 239, 228); circle(me.x, me.y - 2, 8);
+
+  const shown = days.filter(d => d.at <= walked + 1e-6);
+  document.getElementById('big').textContent = `${walked.toFixed(1)} km walked since ${new Date(days[0].date + 'T00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}`;
+  document.getElementById('sub').textContent = shown.length
+    ? `${shown.length} days on the path · ${shown.filter(d => d.outside).length} longer walks outside (leaves) · tap to walk it again`
+    : '';
+}
+</script>
+</body></html>

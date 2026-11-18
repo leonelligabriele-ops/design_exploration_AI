@@ -46,10 +46,11 @@ directory to Cloudflare. First deploy prints your live URL
 
 ## Local development
 
-Two options:
+1. Put your Claude API key in `.dev.vars` (copy `.dev.vars.example` if the
+   file doesn't exist): `ANTHROPIC_KEY=sk-ant-...`. The file is git-ignored.
+2. Run `npm run dev` and open http://localhost:5173. Pick **Claude** in the
+   top-right model switch.
 
-- `npm run dev` — Vite only. Claude won't work locally (proxy unavailable).
-  Fine if you're testing UI or Ollama-only.
-- `npm run dev:proxy` — Vite + Wrangler Pages Functions. Requires
-  `.dev.vars` (copy from `.dev.vars.example`, fill in `ANTHROPIC_KEY`).
-  Behaves identically to production.
+The Vite dev server adds the key to `/api/claude` requests itself, so it never
+reaches the browser. Restart `npm run dev` after changing `.dev.vars`.
+(`npm run dev:proxy` does not start with the current `wrangler.toml`.)

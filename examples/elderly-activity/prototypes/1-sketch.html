@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<style>
+  body { margin: 0; padding: 16px; background: #fff; color: #222; font-family: 'Patrick Hand', cursive; }
+  svg { width: 100%; height: auto; display: block; }
+  text { font-family: 'Patrick Hand', cursive; fill: #222; }
+  #wait { font-size: 20px; color: #666; }
+</style></head>
+<body>
+<div id="wait">Upload a CSV to see the sketch.</div>
+<svg id="s" viewBox="0 0 800 440" style="display:none"></svg>
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+const pencil = { roughness: 1.3, stroke: '#333', strokeWidth: 1.4 };
+function txt(svg, x, y, s, size = 19, fill = '#222', anchor = 'start') {
+  const t = document.createElementNS(NS, 'text');
+  t.setAttribute('x', x); t.setAttribute('y', y); t.setAttribute('text-anchor', anchor);
+  t.style.fontSize = size + 'px'; t.style.fill = fill; t.textContent = s; svg.appendChild(t);
+}
+
+window.onBioframe = function (frame) {
+  const days = frame.data.rows.filter(r => typeof r.steps === 'number');
+  if (!days.length) return;
+  document.getElementById('wait').style.display = 'none';
+  const svg = document.getElementById('s');
+  svg.style.display = 'block'; svg.innerHTML = '';
+  const rc = rough.svg(svg); const add = (el) => svg.appendChild(el);
+  const last = days[days.length - 1];
+  const week = days.slice(-7);
+
+  // ── The older person's screen: big and simple ──
+  add(rc.rectangle(20, 20, 400, 400, { ...pencil, roughness: 1.6 }));
+  txt(svg, 40, 52, 'For them (tablet or phone)', 16, '#777');
+  txt(svg, 40, 100, `Yesterday you moved`, 26);
+  txt(svg, 40, 150, `${last.steps.toLocaleString('en-GB')} steps`, 44);
+  // This week as circles: bigger circle = more steps
+  const max = Math.max(...week.map(d => d.steps));
+  week.forEach((d, i) => {
+    const x = 70 + i * 50, r = 12 + 24 * d.steps / max;
+    add(rc.circle(x, 240, r, { ...pencil, fill: '#ccc', fillStyle: 'hachure', hachureGap: 4 }));
+    txt(svg, x, 285, d.weekday, 15, '#555', 'middle');
+  });
+  txt(svg, 40, 205, 'this week', 16, '#777');
+  add(rc.rectangle(40, 315, 360, 80, { ...pencil, strokeLineDash: [6, 6], stroke: '#888' }));
+  txt(svg, 55, 345, '? how do we say it kindly,', 18, '#777');
+  txt(svg, 55, 372, '  without judging', 18, '#777');
+
+  // ── Family / physiotherapist: the longer view ──
+  add(rc.rectangle(450, 20, 330, 400, { ...pencil, roughness: 1.6 }));
+  txt(svg, 470, 52, 'Family / physio', 16, '#777');
+  txt(svg, 470, 85, `Steps, last ${days.length} days`, 20);
+  const x0 = 475, y0 = 280, w = 285, h = 160;
+  add(rc.line(x0, y0, x0 + w, y0, pencil));
+  add(rc.line(x0, y0, x0, y0 - h, pencil));
+  const allMax = Math.max(...days.map(d => d.steps));
+  const pts = days.map((d, i) => [x0 + 5 + i * (w - 10) / (days.length - 1), y0 - 5 - (d.steps / allMax) * (h - 15)]);
+  add(rc.linearPath(pts, { ...pencil, roughness: 0.9 }));
+  txt(svg, x0 + w, y0 + 22, 'weeks →', 15, '#555', 'end');
+  add(rc.rectangle(470, 320, 290, 80, { ...pencil, strokeLineDash: [6, 6], stroke: '#888' }));
+  txt(svg, 485, 350, '? phone, tablet or the watch', 18, '#777');
+  txt(svg, 485, 377, '? what to show on a quiet day', 18, '#777');
+};
+</script>
+</body></html>

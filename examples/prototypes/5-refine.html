@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.7/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/simple-statistics@7.8.8/dist/simple-statistics.min.js"></script>
+<style>
+  :root { --ink: #1d2433; --muted: #677086; --line: #e3e6ec; --blue: #2f6fb3; --blue-soft: #e8f0fa; --warm: #d0603a; --warm-soft: #fbece6; --bg: #fbfaf7; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--ink); background: var(--bg); }
+  .app { max-width: 560px; margin: 0 auto; padding: 18px 18px 24px; }
+  .tabs { display: flex; background: #eef0f4; border-radius: 12px; padding: 4px; margin-bottom: 18px; }
+  .tabs button { flex: 1; font: inherit; font-weight: 600; font-size: 15px; padding: 9px; border: 0; border-radius: 9px; background: none; color: var(--muted); cursor: pointer; transition: background .2s, color .2s; }
+  .tabs button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .card { background: #fff; border-radius: 18px; padding: 20px; box-shadow: 0 2px 12px rgba(29,36,51,.06); margin-bottom: 14px; }
+  .eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+  .hero { display: flex; align-items: center; gap: 18px; }
+  .big { font-size: 46px; font-weight: 750; line-height: 1; letter-spacing: -.02em; }
+  .gain { display: inline-block; margin-top: 8px; font-weight: 700; color: var(--blue); background: var(--blue-soft); padding: 4px 10px; border-radius: 999px; font-size: 15px; }
+  .weeks { display: flex; align-items: flex-end; gap: 8px; height: 110px; margin-top: 6px; }
+  .wk { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; font-size: 12px; color: var(--muted); }
+  .wk .bar { width: 100%; border-radius: 8px 8px 4px 4px; background: var(--blue); transform-origin: bottom; }
+  .wk .val { font-weight: 700; color: var(--ink); margin-bottom: 4px; font-size: 13px; }
+  .finding { font-size: 19px; font-weight: 650; line-height: 1.35; margin: 0 0 6px; }
+  .finding em { font-style: normal; color: var(--warm); }
+  .muted { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0; }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  .compare div { background: var(--bg); border-radius: 12px; padding: 12px; }
+  .compare b { display: block; font-size: 22px; }
+  .compare .hi { background: var(--warm-soft); }
+  ul.days { list-style: none; margin: 10px 0 0; padding: 0; }
+  ul.days li { display: flex; justify-content: space-between; padding: 8px 0; border-top: 1px solid var(--line); font-size: 14px; }
+  .empty { text-align: center; padding: 48px 16px; color: var(--muted); }
+  [hidden] { display: none !important; }
+</style></head>
+<body>
+<div class="app">
+  <div class="empty" id="empty">Upload the patient's CSV to see their progress.</div>
+  <div id="main" hidden>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-view="patient">For the patient</button>
+      <button role="tab" aria-selected="false" data-view="physio">For the physio</button>
+    </div>
+
+    <section id="patient">
+      <div class="card">
+        <p class="eyebrow">Your knee bend today</p>
+        <div class="hero">
+          <svg width="150" height="110" viewBox="0 0 150 110" aria-hidden="true">
+            <line x1="10" y1="30" x2="75" y2="30" stroke="#1d2433" stroke-width="10" stroke-linecap="round"/>
+            <line id="ghost" x1="75" y1="30" x2="75" y2="100" stroke="#b9c0cc" stroke-width="4" stroke-dasharray="6 6"/>
+            <line id="shin" x1="75" y1="30" x2="75" y2="100" stroke="#2f6fb3" stroke-width="10" stroke-linecap="round"/>
+            <circle cx="75" cy="30" r="9" fill="#1d2433"/>
+          </svg>
+          <div>
+            <div class="big"><span id="today">0</span>°</div>
+            <div class="gain" id="gain"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <p class="eyebrow">Week by week, above where you started</p>
+        <div class="weeks" id="weeks"></div>
+      </div>
+    </section>
+
+    <section id="physio" hidden>
+      <div class="card">
+        <p class="eyebrow">Does pain go up on days with more exercise?</p>
+        <p class="finding" id="finding"></p>
+        <p class="muted" id="detail"></p>
+        <div class="compare" id="compare"></div>
+      </div>
+      <div class="card">
+        <p class="eyebrow">Days with the most pain</p>
+        <ul class="days" id="painDays"></ul>
+        <p class="muted" id="sample" style="margin-top:12px"></p>
+      </div>
+    </section>
+  </div>
+</div>
+<script>
+const num = (v) => typeof v === 'number' && isFinite(v);
+const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+const K = { x: 75, y: 30 }, LEN = 66;
+const leg = (deg) => ({ x2: K.x + Math.cos(deg * Math.PI / 180) * LEN, y2: K.y + Math.sin(deg * Math.PI / 180) * LEN });
+
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-selected', x === b));
+  for (const v of ['patient', 'physio']) document.getElementById(v).hidden = v !== b.dataset.view;
+  gsap.from(`#${b.dataset.view} .card`, { y: 12, opacity: 0, duration: .45, stagger: .08, ease: 'power2.out' });
+});
+
+window.onBioframe = function (frame) {
+  const rows = frame.data.rows;
+  const bends = rows.filter(r => num(r.knee_flexion_deg));
+  document.getElementById('empty').hidden = bends.length > 0;
+  document.getElementById('main').hidden = !bends.length;
+  if (!bends.length) { document.getElementById('empty').textContent = 'No knee bend values found in this file.'; return; }
+  patient(rows, bends);
+  physio(rows);
+};
+
+function patient(rows, bends) {
+  const first = bends[0].knee_flexion_deg, now = bends[bends.length - 1].knee_flexion_deg;
+  const g = document.getElementById('ghost'), s = document.getElementById('shin');
+  for (const [k, v] of Object.entries(leg(first))) { g.setAttribute(k, v); s.setAttribute(k, v); }
+  const state = { deg: first };
+  gsap.to(state, { deg: now, duration: 1.6, ease: 'power3.out', onUpdate: () => {
+    for (const [k, v] of Object.entries(leg(state.deg))) s.setAttribute(k, v);
+    document.getElementById('today').textContent = Math.round(state.deg);
+  } });
+  const diff = now - first;
+  document.getElementById('gain').textContent = diff >= 0 ? `+${diff}° since you started` : `${diff}° since you started`;
+
+  const base = ss.mean(bends.slice(0, 3).map(r => r.knee_flexion_deg));
+  const weeks = [];
+  for (let w = 0; w * 7 < rows.length; w++) {
+    const v = rows.slice(w * 7, w * 7 + 7).map(r => r.knee_flexion_deg).filter(num);
+    if (v.length) weeks.push({ w, gain: Math.max(0, ss.mean(v) - base) });
+  }
+  const max = Math.max(...weeks.map(d => d.gain), 1);
+  const box = document.getElementById('weeks');
+  box.innerHTML = weeks.map(d => `<div class="wk"><span class="val">+${Math.round(d.gain)}°</span><div class="bar" style="height:${Math.max(4, 70 * d.gain / max)}px"></div><span>wk ${d.w + 1}</span></div>`).join('');
+  gsap.from('#weeks .bar', { scaleY: 0, duration: .8, stagger: .07, ease: 'power2.out', delay: .3 });
+}
+
+function physio(rows) {
+  const pairs = rows.slice(0, -1).map((r, i) => ({ ex: r.exercise_minutes, pain: rows[i + 1].pain_0_10 }))
+    .filter(d => num(d.ex) && num(d.pain));
+  const same = rows.filter(r => num(r.exercise_minutes) && num(r.pain_0_10));
+  if (pairs.length < 5) {
+    document.getElementById('finding').textContent = 'Not enough days with both exercise and pain recorded yet.';
+    return;
+  }
+  const rNext = ss.sampleCorrelation(pairs.map(d => d.ex), pairs.map(d => d.pain));
+  const rSame = ss.sampleCorrelation(same.map(r => r.exercise_minutes), same.map(r => r.pain_0_10));
+  const med = ss.median(pairs.map(d => d.ex));
+  const after = (hard) => ss.mean(pairs.filter(d => hard ? d.ex > med : d.ex <= med).map(d => d.pain));
+  const hi = after(true), lo = after(false);
+  const linked = Math.abs(rNext) >= 0.3;
+
+  document.getElementById('finding').innerHTML = linked
+    ? `Pain tends to be <em>higher the day after</em> more exercise.`
+    : `There is no clear link between exercise and next-day pain.`;
+  document.getElementById('detail').textContent =
+    `Next-day link r = ${rNext.toFixed(2)}; same-day link r = ${rSame.toFixed(2)}.`;
+  document.getElementById('compare').innerHTML =
+    `<div class="hi">Day after more than ${Math.round(med)} min<b>${hi.toFixed(1)} / 10</b>average pain</div>` +
+    `<div>Day after ${Math.round(med)} min or less<b>${lo.toFixed(1)} / 10</b>average pain</div>`;
+
+  const top = rows.map((r, i) => ({ r, prev: rows[i - 1] })).filter(d => num(d.r.pain_0_10))
+    .sort((a, b) => b.r.pain_0_10 - a.r.pain_0_10).slice(0, 4);
+  document.getElementById('painDays').innerHTML = top.map(d =>
+    `<li><span>${fmt(d.r.date)} · pain <b>${d.r.pain_0_10}</b></span><span>${d.prev && num(d.prev.exercise_minutes) ? d.prev.exercise_minutes + ' min the day before' : '—'}</span></li>`).join('');
+  document.getElementById('sample').textContent =
+    `Based on ${pairs.length} days. A hint to discuss with the patient, not proof of cause.`;
+}
+</script>
+</body></html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<style>
+  body { margin: 0; padding: 24px; background: #fffaf2; color: #2b2620; font-family: Verdana, Geneva, sans-serif; }
+  .big { display: block; width: 100%; font: inherit; font-size: 30px; font-weight: bold; line-height: 1.25; padding: 30px 24px; border: 0; border-radius: 28px; cursor: pointer; background: #2f6b4f; color: #fff; box-shadow: 0 6px 0 #1f4a36; }
+  .big:active { transform: translateY(4px); box-shadow: 0 2px 0 #1f4a36; }
+  .second { margin-top: 18px; font-size: 24px; background: #f0e3cc; color: #2b2620; box-shadow: 0 6px 0 #d9c6a3; }
+  .speaker { font-size: 34px; display: block; margin-bottom: 4px; }
+  #said { margin-top: 26px; font-size: 26px; line-height: 1.45; min-height: 3em; }
+  #wait { font-size: 22px; color: #6b6156; }
+</style></head>
+<body>
+<div id="wait">Waiting for the watch data…</div>
+<div id="app" hidden>
+  <button class="big" id="yesterday"><span class="speaker" aria-hidden="true">🔊</span>How did I do yesterday?</button>
+  <button class="big second" id="week">And this week?</button>
+  <p id="said" aria-live="polite"></p>
+</div>
+<script>
+// One big button that speaks. The words compare with the person's own
+// usual days (the median of the four weeks before), never with a fixed goal.
+let days = [];
+const fmt = (n) => Math.round(n).toLocaleString('en-GB');
+const median = (a) => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+
+window.onBioframe = function (frame) {
+  days = frame.data.rows.filter(r => typeof r.steps === 'number');
+  document.getElementById('wait').hidden = days.length > 0;
+  document.getElementById('app').hidden = !days.length;
+};
+
+// Speak in the language of the text, not the computer's default language.
+const LANG = 'en-GB';
+function englishVoice() {
+  const voices = speechSynthesis.getVoices();
+  return voices.find(v => v.lang === LANG) || voices.find(v => v.lang.startsWith('en')) || null;
+}
+
+function say(text) {
+  document.getElementById('said').textContent = text;
+  if (!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = LANG;
+  const voice = englishVoice();
+  if (voice) u.voice = voice;
+  u.rate = 0.85;            // a calm pace
+  speechSynthesis.speak(u);
+}
+if ('speechSynthesis' in window) speechSynthesis.getVoices();   // voices load in the background
+
+document.getElementById('yesterday').onclick = () => {
+  const d = days[days.length - 1];
+  const usual = median(days.slice(-29, -1).map(x => x.steps));
+  const ratio = d.steps / usual;
+  const when = new Date(d.date + 'T00:00').toLocaleDateString('en-GB', { weekday: 'long' });
+  say(ratio >= 1.15 ? `On ${when} you took ${fmt(d.steps)} steps. That is more than on most of your days. Well done.`
+    : ratio >= 0.85 ? `On ${when} you took ${fmt(d.steps)} steps. A good, ordinary day for you.`
+    : `On ${when} you took ${fmt(d.steps)} steps. A quieter day. Quiet days are part of every week.`);
+};
+
+document.getElementById('week').onclick = () => {
+  const week = days.slice(-7);
+  const moving = week.filter(d => d.active_minutes >= 30).length;
+  const best = week.reduce((a, b) => (b.steps > a.steps ? b : a));
+  const bestDay = new Date(best.date + 'T00:00').toLocaleDateString('en-GB', { weekday: 'long' });
+  say(`This week you were up and about for half an hour or more on ${moving} of ${week.length} days. ` +
+      `Your most active day was ${bestDay}, with ${fmt(best.steps)} steps.`);
+};
+</script>
+</body></html>

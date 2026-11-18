@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/simple-statistics@7.8.8/dist/simple-statistics.min.js"></script>
+<style>
+  body { margin: 0; padding: 18px 20px; font-family: system-ui, sans-serif; color: #2a2a26; background: #fbfaf6; }
+  h2 { font-size: 17px; margin: 0 0 2px; }
+  .sub { color: #6c6a60; font-size: 13px; margin: 0 0 10px; }
+  section { margin-bottom: 20px; }
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .key { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: #6c6a60; margin-top: 6px; }
+  .key i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; }
+  #wait { color: #6c6a60; }
+</style></head>
+<body>
+<div id="wait">Upload the watch data to see the interpretation.</div>
+<div id="app" hidden>
+  <section>
+    <h2>Each day compared with their own usual — not with a target</h2>
+    <p class="sub" id="usualText"></p>
+    <svg id="cal" viewBox="0 0 560 290"></svg>
+    <div class="key">
+      <span><i style="background:#e9e3d6"></i>quieter than usual</span>
+      <span><i style="background:#b9d7b4"></i>about usual</span>
+      <span><i style="background:#4f8f5b"></i>more than usual</span>
+      <span><i style="background:none;outline:2px solid #c0573e"></i>resting heart rate clearly above their normal</span>
+      <span><i style="background:repeating-linear-gradient(45deg,#ddd 0 3px,#fff 3px 6px)"></i>watch not worn</span>
+    </div>
+  </section>
+  <section>
+    <h2>Which days help them move</h2>
+    <p class="sub" id="weekdayText"></p>
+    <svg id="wd" viewBox="0 0 560 150"></svg>
+  </section>
+</div>
+<script>
+const num = (v) => typeof v === 'number' && isFinite(v);
+const ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+window.onBioframe = function (frame) {
+  const rows = frame.data.rows;
+  const worn = rows.filter(r => num(r.steps));
+  document.getElementById('wait').hidden = worn.length > 0;
+  document.getElementById('app').hidden = !worn.length;
+  if (!worn.length) return;
+  calendar(rows, worn);
+  weekdays(worn);
+};
+
+function calendar(rows, worn) {
+  const usual = ss.median(worn.map(r => r.steps));
+  const hrs = worn.map(r => r.resting_heart_rate).filter(num);
+  const hrNormal = ss.median(hrs), hrSpread = ss.medianAbsoluteDeviation(hrs) || 1;
+  document.getElementById('usualText').textContent =
+    `Their usual day is about ${Math.round(usual).toLocaleString('en-GB')} steps. Their usual resting heart rate is ${Math.round(hrNormal)}.`;
+
+  const first = new Date(rows[0].date + 'T00:00');
+  const offset = (first.getDay() + 6) % 7;          // Monday-first weeks
+  const cell = 52, gap = 6, left = 66, top = 24;
+  const svg = d3.select('#cal').html('');
+  ORDER.forEach((d, i) => svg.append('text').attr('x', left + i * (cell + gap) + cell / 2).attr('y', 14)
+    .attr('text-anchor', 'middle').attr('font-size', 11).attr('fill', '#6c6a60').text(d));
+  const colour = (r) => !num(r.steps) ? 'url(#hatch)'
+    : r.steps < usual * 0.8 ? '#e9e3d6' : r.steps > usual * 1.2 ? '#4f8f5b' : '#b9d7b4';
+  svg.append('defs').html('<pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="3" height="6" fill="#ddd"/></pattern>');
+
+  rows.forEach((r, i) => {
+    const k = i + offset, wk = Math.floor(k / 7), wd = k % 7;
+    const x = left + wd * (cell + gap), y = top + wk * (cell * 0.5 + gap);
+    if (wd === 0) svg.append('text').attr('x', left - 8).attr('y', y + cell * 0.25 + 4).attr('text-anchor', 'end')
+      .attr('font-size', 11).attr('fill', '#6c6a60').text(`week ${wk + 1}`);
+    const high = num(r.resting_heart_rate) && r.resting_heart_rate >= hrNormal + 3 * hrSpread;
+    svg.append('rect').attr('x', x).attr('y', y).attr('width', cell).attr('height', cell * 0.5).attr('rx', 5)
+      .attr('fill', colour(r)).attr('stroke', high ? '#c0573e' : 'none').attr('stroke-width', 2.5)
+      .append('title').text(num(r.steps) ? `${r.date}: ${r.steps} steps, resting HR ${r.resting_heart_rate}` : `${r.date}: watch not worn`);
+  });
+}
+
+function weekdays(worn) {
+  const by = ORDER.map(d => {
+    const v = worn.filter(r => r.weekday === d);
+    return { d, steps: v.length ? ss.mean(v.map(r => r.steps)) : 0, outdoor: v.length ? ss.mean(v.map(r => r.outdoor_minutes || 0)) : 0 };
+  });
+  const best = [...by].sort((a, b) => b.steps - a.steps).slice(0, 2);
+  document.getElementById('weekdayText').textContent =
+    `${best.map(b => b.d).join(' and ')} are their most active days, with about ${Math.round(ss.mean(best.map(b => b.outdoor)))} minutes outside. ` +
+    `What happens on those days could be worth asking about.`;
+  const svg = d3.select('#wd').html('');
+  const x = d3.scaleBand(ORDER, [40, 540]).padding(0.25);
+  const y = d3.scaleLinear([0, d3.max(by, b => b.steps)], [120, 10]);
+  svg.selectAll('rect').data(by).join('rect').attr('x', b => x(b.d)).attr('width', x.bandwidth())
+    .attr('y', b => y(b.steps)).attr('height', b => 120 - y(b.steps)).attr('rx', 4)
+    .attr('fill', b => best.includes(b) ? '#4f8f5b' : '#c9c3b4');
+  svg.selectAll('.l').data(by).join('text').attr('x', b => x(b.d) + x.bandwidth() / 2).attr('y', 138)
+    .attr('text-anchor', 'middle').attr('font-size', 12).attr('fill', '#6c6a60').text(b => b.d);
+  svg.selectAll('.v').data(by).join('text').attr('x', b => x(b.d) + x.bandwidth() / 2).attr('y', b => y(b.steps) - 5)
+    .attr('text-anchor', 'middle').attr('font-size', 11).text(b => Math.round(b.steps).toLocaleString('en-GB'));
+}
+</script>
+</body></html>

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<script src="https://cdn.jsdelivr.net/npm/p5@1.11.3/lib/p5.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0f1420; font-family: system-ui, sans-serif; }
+  #label { position: fixed; left: 20px; top: 16px; color: #e8ecf5; pointer-events: none; }
+  #label b { font-size: 30px; display: block; }
+  #label span { font-size: 14px; color: #9aa4ba; }
+  #hint { position: fixed; right: 18px; bottom: 14px; color: #6f7a92; font-size: 13px; pointer-events: none; }
+</style></head>
+<body>
+<div id="label"><b id="big">Waiting for data…</b><span id="sub">Upload a CSV to see the knee open up.</span></div>
+<div id="hint">tap to replay the weeks</div>
+<script>
+// Every day is one stroke of the lower leg, drawn from the same knee.
+// Six weeks of strokes open like a fan: the wider the fan, the further the
+// knee bends. Colour carries pain that day: cool when calm, warm when sore.
+let days = [], shown = 0, startTime = 0;
+const PLAY_MS = 6000;
+
+window.onBioframe = function (frame) {
+  days = frame.data.rows
+    .filter(r => typeof r.knee_flexion_deg === 'number')
+    .map((r, i) => ({ i, bend: r.knee_flexion_deg, pain: typeof r.pain_0_10 === 'number' ? r.pain_0_10 : null, date: r.date }));
+  replay();
+};
+
+function replay() { startTime = performance.now(); }  // data can arrive before p5 starts
+
+function setup() { createCanvas(windowWidth, windowHeight); }
+function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+function mousePressed() { if (days.length) replay(); }
+
+function painColour(p) {
+  if (p === null) return color(140, 150, 170);
+  const t = constrain(p / 7, 0, 1);
+  return lerpColor(color(90, 200, 230), color(255, 120, 80), t);
+}
+
+function draw() {
+  background(15, 20, 32);
+  if (!days.length) return;
+
+  const kx = width * 0.42, ky = height * 0.36;
+  const len = min(width, height) * 0.48;
+  const progress = constrain((performance.now() - startTime) / PLAY_MS, 0, 1);
+  shown = max(1, floor(progress * days.length));
+
+  // Thigh
+  stroke(230, 236, 245); strokeWeight(14); strokeCap(ROUND);
+  line(kx - len * 0.9, ky, kx, ky);
+
+  // Lower leg, one faint stroke per day; the newest is bright.
+  for (let d = 0; d < shown; d++) {
+    const day = days[d];
+    const a = radians(day.bend);
+    const c = painColour(day.pain);
+    const newest = d === shown - 1;
+    c.setAlpha(newest ? 255 : 70 + 120 * (d / days.length));
+    stroke(c); strokeWeight(newest ? 9 : 2.5);
+    line(kx, ky, kx + cos(a) * len, ky + sin(a) * len);
+  }
+
+  // The first day stays visible as a ghost, to compare with.
+  const a0 = radians(days[0].bend);
+  drawingContext.setLineDash([8, 10]);
+  stroke(255, 255, 255, 110); strokeWeight(2);
+  line(kx, ky, kx + cos(a0) * len * 1.08, ky + sin(a0) * len * 1.08);
+  drawingContext.setLineDash([]);
+
+  noStroke(); fill(230, 236, 245); circle(kx, ky, 26);
+
+  const now = days[shown - 1];
+  document.getElementById('big').textContent = `${now.bend}°`;
+  document.getElementById('sub').textContent =
+    `day ${now.i + 1} · ${now.bend - days[0].bend >= 0 ? '+' : ''}${now.bend - days[0].bend}° since day 1` +
+    (now.pain !== null ? ` · pain ${now.pain}/10` : '');
+}
+</script>
+</body></html>

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/roughjs@4.6.6/bundled/rough.js"></script>
+<style>
+  body { margin: 0; padding: 16px; background: #fff; color: #222; font-family: 'Patrick Hand', cursive; }
+  svg { width: 100%; height: auto; display: block; }
+  text { font-family: 'Patrick Hand', cursive; fill: #222; }
+  .small { font-size: 15px; fill: #555; }
+  .q { font-size: 15px; fill: #777; }
+  #wait { font-size: 20px; color: #666; }
+</style></head>
+<body>
+<div id="wait">Upload a CSV to see the sketch.</div>
+<svg id="s" viewBox="0 0 780 430" style="display:none"></svg>
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+const pencil = { roughness: 1.3, stroke: '#333', strokeWidth: 1.4 };
+
+function txt(svg, x, y, s, cls, anchor) {
+  const t = document.createElementNS(NS, 'text');
+  t.setAttribute('x', x); t.setAttribute('y', y);
+  if (cls) t.setAttribute('class', cls);
+  if (anchor) t.setAttribute('text-anchor', anchor);
+  t.style.fontSize = cls ? null : '19px';
+  t.textContent = s; svg.appendChild(t);
+}
+
+// The knee: thigh fixed, shin turned by the bend angle.
+function shinEnd(kx, ky, deg, len) {
+  const a = deg * Math.PI / 180;
+  return [kx + Math.cos(a) * len, ky + Math.sin(a) * len];
+}
+
+window.onBioframe = function (frame) {
+  const rows = frame.data.rows;
+  const bends = rows.filter(r => typeof r.knee_flexion_deg === 'number');
+  if (!bends.length) return;
+  const first = bends[0], last = bends[bends.length - 1];
+
+  document.getElementById('wait').style.display = 'none';
+  const svg = document.getElementById('s');
+  svg.style.display = 'block'; svg.innerHTML = '';
+  const rc = rough.svg(svg);
+  const add = (el) => svg.appendChild(el);
+
+  // ── Patient: every day ──
+  add(rc.rectangle(20, 20, 300, 390, { ...pencil, roughness: 1.6 }));
+  txt(svg, 40, 55, 'Patient – every day');
+  const kx = 150, ky = 170;
+  add(rc.line(50, ky, kx, ky, { ...pencil, strokeWidth: 3 }));            // thigh
+  const [fx, fy] = shinEnd(kx, ky, first.knee_flexion_deg, 120);
+  add(rc.line(kx, ky, fx, fy, { ...pencil, strokeLineDash: [6, 6], stroke: '#999' }));  // start
+  const [tx, ty] = shinEnd(kx, ky, last.knee_flexion_deg, 120);
+  add(rc.line(kx, ky, tx, ty, { ...pencil, strokeWidth: 3 }));             // today
+  add(rc.arc(kx, ky, 90, 90, first.knee_flexion_deg * Math.PI / 180, last.knee_flexion_deg * Math.PI / 180, false, pencil));
+  txt(svg, fx + 6, fy + 18, 'where they started', 'small');
+  txt(svg, tx - 10, ty + 22, 'today', 'small', 'end');
+  txt(svg, 40, 340, `Started: ${first.knee_flexion_deg}°   Today: ${last.knee_flexion_deg}°`);
+  txt(svg, 40, 368, `+${last.knee_flexion_deg - first.knee_flexion_deg}° since the start`);
+  add(rc.rectangle(200, 70, 105, 50, { ...pencil, strokeLineDash: [5, 5], stroke: '#888' }));
+  txt(svg, 210, 92, '? stay', 'q'); txt(svg, 210, 110, 'motivated how', 'q');
+
+  // ── Physio: pain vs exercise ──
+  add(rc.rectangle(350, 20, 410, 390, { ...pencil, roughness: 1.6 }));
+  txt(svg, 370, 55, 'Physio – does pain go up');
+  txt(svg, 370, 77, 'on days they exercised more?');
+  const px = 400, py = 330, pw = 320, ph = 200;
+  add(rc.line(px, py, px + pw, py, pencil));
+  add(rc.line(px, py, px, py - ph, pencil));
+  txt(svg, px + pw, py + 24, 'more exercise →', 'small', 'end');
+  txt(svg, px - 8, py - ph - 8, 'pain ↑', 'small');
+  const pts = rows.filter(r => typeof r.pain_0_10 === 'number' && typeof r.exercise_minutes === 'number');
+  const maxEx = Math.max(...pts.map(r => r.exercise_minutes));
+  for (const r of pts) {
+    const x = px + 10 + (r.exercise_minutes / maxEx) * (pw - 20);
+    const y = py - 10 - (r.pain_0_10 / 10) * (ph - 20);
+    add(rc.circle(x, y, 9, { ...pencil, roughness: 0.8, fill: '#bbb', fillStyle: 'solid', strokeWidth: 1 }));
+  }
+  add(rc.rectangle(560, 345, 185, 50, { ...pencil, strokeLineDash: [5, 5], stroke: '#888' }));
+  txt(svg, 570, 366, '? how often does', 'q'); txt(svg, 570, 384, 'the physio look', 'q');
+};
+</script>
+</body></html>

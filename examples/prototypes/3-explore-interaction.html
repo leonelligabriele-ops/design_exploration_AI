@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<style>
+  body { margin: 0; padding: 20px; font-family: system-ui, sans-serif; background: #f6f3ee; color: #23201c; }
+  h2 { font-size: 18px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: #6a6259; font-size: 14px; }
+  .turn { background: #fff; border-radius: 16px; padding: 16px 18px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .who { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #a0522d; }
+  svg { width: 100%; max-width: 420px; height: auto; display: block; touch-action: none; }
+  button { font: inherit; font-weight: 600; padding: 8px 16px; border-radius: 10px; border: 0; background: #23201c; color: #fff; cursor: pointer; }
+  button.alt { background: #ebe5dc; color: #23201c; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .answer { margin-top: 12px; font-size: 15px; line-height: 1.5; display: none; }
+  #wait { color: #6a6259; }
+</style></head>
+<body>
+<div id="wait">Upload a CSV to start.</div>
+<div id="app" style="display:none">
+  <div class="turn">
+    <div class="who">Patient's turn</div>
+    <h2>How far do you think your knee bends now?</h2>
+    <p>Drag the lower leg to where it feels like it gets to.</p>
+    <svg id="leg" viewBox="0 0 400 300">
+      <line x1="40" y1="110" x2="200" y2="110" stroke="#23201c" stroke-width="16" stroke-linecap="round"/>
+      <line id="start" x1="200" y1="110" x2="200" y2="110" stroke="#9c958c" stroke-width="4" stroke-dasharray="8 8" visibility="hidden"/>
+      <line id="real" x1="200" y1="110" x2="200" y2="110" stroke="#2e8b57" stroke-width="12" stroke-linecap="round" visibility="hidden"/>
+      <line id="guess" x1="200" y1="110" x2="200" y2="250" stroke="#a0522d" stroke-width="12" stroke-linecap="round"/>
+      <circle cx="200" cy="110" r="14" fill="#23201c"/>
+      <circle id="handle" cx="200" cy="250" r="16" fill="#a0522d" style="cursor:grab"/>
+      <text id="guessText" x="20" y="285" font-size="16" fill="#a0522d"></text>
+    </svg>
+    <div class="row"><button id="reveal">Show my real bend</button></div>
+    <div class="answer" id="a1"></div>
+  </div>
+
+  <div class="turn">
+    <div class="who">Physio's turn</div>
+    <h2>On harder days, did pain go up?</h2>
+    <p>Guess first, then look at the data together.</p>
+    <div class="row">
+      <button class="alt" data-g="up">Yes, it went up</button>
+      <button class="alt" data-g="same">No real difference</button>
+    </div>
+    <div class="answer" id="a2"></div>
+  </div>
+</div>
+<script>
+const K = { x: 200, y: 110 }, LEN = 140;
+let rows = [], guessDeg = 90;
+
+const end = (deg) => [K.x + Math.cos(deg * Math.PI / 180) * LEN, K.y + Math.sin(deg * Math.PI / 180) * LEN];
+function setLine(id, deg) {
+  const [x, y] = end(deg); const l = document.getElementById(id);
+  l.setAttribute('x2', x); l.setAttribute('y2', y);
+}
+function setGuess(deg) {
+  guessDeg = Math.max(0, Math.min(160, Math.round(deg)));
+  setLine('guess', guessDeg);
+  const [x, y] = end(guessDeg);
+  const h = document.getElementById('handle'); h.setAttribute('cx', x); h.setAttribute('cy', y);
+  document.getElementById('guessText').textContent = `Your guess: ${guessDeg}°`;
+}
+
+const svg = document.getElementById('leg');
+let dragging = false;
+svg.addEventListener('pointerdown', e => { dragging = true; svg.setPointerCapture(e.pointerId); move(e); });
+svg.addEventListener('pointermove', e => dragging && move(e));
+svg.addEventListener('pointerup', () => dragging = false);
+function move(e) {
+  const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+  const q = p.matrixTransform(svg.getScreenCTM().inverse());
+  setGuess(Math.atan2(q.y - K.y, q.x - K.x) * 180 / Math.PI);
+}
+
+window.onBioframe = function (frame) {
+  rows = frame.data.rows;
+  document.getElementById('wait').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  setGuess(90);
+};
+
+document.getElementById('reveal').onclick = () => {
+  const bends = rows.filter(r => typeof r.knee_flexion_deg === 'number');
+  if (!bends.length) return;
+  const first = bends[0].knee_flexion_deg, now = bends[bends.length - 1].knee_flexion_deg;
+  setLine('real', now); setLine('start', first);
+  document.getElementById('real').setAttribute('visibility', 'visible');
+  document.getElementById('start').setAttribute('visibility', 'visible');
+  const diff = now - guessDeg;
+  const a = document.getElementById('a1');
+  a.style.display = 'block';
+  a.innerHTML = `Your knee really bends <b>${now}°</b> (green). You started at ${first}° (dashed) — that is <b>+${now - first}°</b>.<br>` +
+    (Math.abs(diff) <= 5 ? 'Your feeling was spot on.'
+      : diff > 0 ? `It bends <b>${diff}° more</b> than it feels.` : `It feels ${-diff}° further than it bends today.`);
+};
+
+document.querySelectorAll('[data-g]').forEach(b => b.onclick = () => {
+  const pts = rows.filter(r => typeof r.pain_0_10 === 'number' && typeof r.exercise_minutes === 'number');
+  const sorted = [...pts].sort((a, b) => a.exercise_minutes - b.exercise_minutes);
+  const half = Math.floor(sorted.length / 2);
+  const mean = (a) => a.reduce((s, r) => s + r.pain_0_10, 0) / a.length;
+  const easy = mean(sorted.slice(0, half)), hard = mean(sorted.slice(half));
+  const went = hard - easy >= 0.5 ? 'up' : 'same';
+  const a = document.getElementById('a2');
+  a.style.display = 'block';
+  a.innerHTML = `On the ${sorted.length - half} days with the most exercise, pain averaged <b>${hard.toFixed(1)}</b>; ` +
+    `on the ${half} easiest days, <b>${easy.toFixed(1)}</b>. ` +
+    (went === 'up' ? 'Pain was higher on harder days.' : 'Not a clear difference.') + ' ' +
+    (b.dataset.g === went ? 'Your guess matched the data.' : 'The data says something different from your guess — worth talking about.');
+});
+</script>
+</body></html>

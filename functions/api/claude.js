@@ -45,13 +45,18 @@ export async function onRequestPost({ request, env }) {
     return new Response('Invalid JSON body.', { status: 400 });
   }
 
+  const upstreamHeaders = {
+    'Content-Type': 'application/json',
+    'x-api-key': env.ANTHROPIC_KEY,
+    'anthropic-version': '2023-06-01',
+  };
+  // Pass beta flags through (e.g. the refusal fallback the app opts into).
+  const beta = request.headers.get('anthropic-beta');
+  if (beta) upstreamHeaders['anthropic-beta'] = beta;
+
   const upstream = await fetch(ANTHROPIC_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': env.ANTHROPIC_KEY,
-      'anthropic-version': '2023-06-01',
-    },
+    headers: upstreamHeaders,
     body: JSON.stringify(body),
   });
 

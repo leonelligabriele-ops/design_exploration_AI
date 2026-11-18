@@ -1,9 +1,11 @@
-const ANTHROPIC_MODEL = 'claude-sonnet-4-20250514';
+export const ANTHROPIC_MODEL = 'claude-sonnet-5-5';
+// If a safety filter declines a request, the API re-runs it on a fallback model.
+const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
-export async function sendAnthropic(messages, systemPrompt, callbacks) {
+export async function sendAnthropic(messages, systemPrompt, callbacks, options = {}) {
   const userAssistantMsgs = messages.filter(m => m.role !== 'system');
 
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': 'application/json', 'anthropic-beta': FALLBACK_BETA };
   // If a workshop code is baked into the build, send it so the proxy accepts us.
   const workshopCode = import.meta.env.VITE_WORKSHOP_CODE;
   if (workshopCode) headers['X-Workshop-Code'] = workshopCode;
@@ -14,7 +16,11 @@ export async function sendAnthropic(messages, systemPrompt, callbacks) {
       headers,
       body: JSON.stringify({
         model: ANTHROPIC_MODEL,
-        max_tokens: 16384,
+        // Thinking counts toward this limit, so leave room for long prototypes.
+        max_tokens: 32000,
+        fallbacks: 'default',
+        // Less effort means less silent thinking before the code starts.
+        ...(options.effort && { output_config: { effort: options.effort } }),
         stream: true,
         system: systemPrompt,
         messages: userAssistantMsgs,
@@ -29,6 +35,7 @@ export async function sendAnthropic(messages, systemPrompt, callbacks) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
+    let failed = null;   // an error or refusal reported inside the stream
 
     function processLines(text) {
       const lines = text.split('\n');
@@ -39,8 +46,13 @@ export async function sendAnthropic(messages, systemPrompt, callbacks) {
         if (d === '[DONE]') continue;
         try {
           const p = JSON.parse(d);
+          // Only text is shown; thinking blocks are skipped.
           if (p.type === 'content_block_delta' && p.delta?.text) {
             callbacks.onToken(p.delta.text);
+          } else if (p.type === 'error') {
+            failed = `Claude error: ${p.error?.message || 'unknown error'}`;
+          } else if (p.type === 'message_delta' && p.delta?.stop_reason === 'refusal') {
+            failed = 'Claude declined this request.';
           }
         } catch { /* skip malformed JSON */ }
       }
@@ -59,7 +71,8 @@ export async function sendAnthropic(messages, systemPrompt, callbacks) {
     }
     if (buf.trim()) processLines(buf);
 
-    callbacks.onDone();
+    if (failed) callbacks.onError(failed);
+    else callbacks.onDone();
   } catch (e) {
     callbacks.onError(`Network error: ${e.message}`);
   }

@@ -1,83 +1,29 @@
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback } from 'react';
 import { useTreeStore } from '../store/tree.js';
-import { startBroadcast, stopBroadcast } from '../datalayer/broadcast.js';
-import { startCSV, stopCSV } from '../datalayer/csv.js';
-import { startMediaPipe, stopMediaPipe } from '../datalayer/mediapipe.js';
-import { stopBluetooth } from '../datalayer/bluetooth.js';
-import { ModelUpload } from './ModelUpload.jsx';
-import { SensorPicker } from './SensorPicker.jsx';
+import { loadDataset, clearDataset } from '../datalayer/playback.js';
 
 export function DataBar() {
-  const [webcamReady, setWebcamReady] = useState(false);
-  const [showModelUpload, setShowModelUpload] = useState(false);
-  const [showSensorPicker, setShowSensorPicker] = useState(false);
-  const models = useTreeStore(s => s.models);
-  const removeModel = useTreeStore(s => s.removeModel);
-  const dataSource = useTreeStore(s => s.dataSource);
   const dataFlowing = useTreeStore(s => s.dataFlowing);
-  const frameCount = useTreeStore(s => s.frameCount);
   const csvColumns = useTreeStore(s => s.csvColumns);
   const csvRowCount = useTreeStore(s => s.csvRowCount);
-  const sensorName = useTreeStore(s => s.sensorName);
+  const csvFileName = useTreeStore(s => s.csvFileName);
   const setDataSource = useTreeStore(s => s.setDataSource);
   const setDataFlowing = useTreeStore(s => s.setDataFlowing);
-  const incrementFrame = useTreeStore(s => s.incrementFrame);
   const setCsvColumns = useTreeStore(s => s.setCsvColumns);
   const setCsvRowCount = useTreeStore(s => s.setCsvRowCount);
-  const setSensorName = useTreeStore(s => s.setSensorName);
-  const setSensorParserType = useTreeStore(s => s.setSensorParserType);
-  const setSensorDecoderDescription = useTreeStore(s => s.setSensorDecoderDescription);
+  const setCsvFileName = useTreeStore(s => s.setCsvFileName);
 
   const fileRef = useRef(null);
-  const videoRef = useRef(null);
 
   const stopAll = useCallback(() => {
-    stopBroadcast();
-    stopCSV();
-    stopMediaPipe();
-    stopBluetooth().catch(() => {});
+    clearDataset();
     setDataFlowing(false);
-    setWebcamReady(false);
   }, [setDataFlowing]);
 
-  const handleSourceChange = useCallback((source) => {
+  const handleRemove = useCallback(() => {
     stopAll();
-    setDataSource(source);
-
-    if (source === 'csv') {
-      fileRef.current?.click();
-    } else if (source === 'mediapipe') {
-      // videoRef is attached to the <video> rendered in JSX below
-      const waitForRef = () => {
-        const vid = videoRef.current;
-        if (!vid) { setTimeout(waitForRef, 50); return; }
-        startMediaPipe(vid)
-          .then(() => {
-            startBroadcast(() => { incrementFrame(); });
-            setDataFlowing(true);
-            setWebcamReady(true);
-          })
-          .catch(e => console.error('MediaPipe error:', e));
-      };
-      waitForRef();
-    } else if (source === 'bluetooth') {
-      setShowSensorPicker(true);
-    }
-  }, [stopAll, setDataSource]);
-
-  const handleSensorCommit = useCallback((info) => {
-    setShowSensorPicker(false);
-    setSensorName(info.friendlyName);
-    setSensorParserType(info.parserType);
-    setSensorDecoderDescription(info.decoderDescription || '');
-    startBroadcast(() => { incrementFrame(); });
-    setDataFlowing(true);
-  }, [setSensorName, setSensorParserType, setSensorDecoderDescription, setDataFlowing, incrementFrame]);
-
-  const handleSensorCancel = useCallback(() => {
-    setShowSensorPicker(false);
     setDataSource('none');
-  }, [setDataSource]);
+  }, [stopAll, setDataSource]);
 
   const handleCSVFile = useCallback((e) => {
     const file = e.target.files?.[0];
@@ -88,84 +34,47 @@ export function DataBar() {
     window.Papa.parse(file, {
       header: true,
       dynamicTyping: true,
+      skipEmptyLines: true,
       complete: (results) => {
         const columns = results.meta.fields || [];
+        stopAll();
+        setDataSource('csv');
+        setCsvFileName(file.name);
         setCsvColumns(columns);
         setCsvRowCount(results.data.length);
-        startCSV(results.data, columns);
-        startBroadcast(() => { incrementFrame(); });
+        loadDataset(results.data, columns);
         setDataFlowing(true);
       },
       error: (err) => console.error('CSV parse error:', err),
     });
-  }, [setCsvColumns, setCsvRowCount, incrementFrame, setDataFlowing]);
+  }, [stopAll, setDataSource, setCsvFileName, setCsvColumns, setCsvRowCount, setDataFlowing]);
+
+  const loaded = csvColumns.length > 0;
 
   return (
     <div className="data-bar">
-      <div className="data-bar-left">
-        <span className="data-bar-title">Connect data</span>
-        <button
-          className={dataSource === 'csv' ? 'active' : ''}
-          onClick={() => handleSourceChange('csv')}
-        >
-          CSV file
-        </button>
-        <button
-          className={dataSource === 'mediapipe' ? 'active' : ''}
-          onClick={() => handleSourceChange('mediapipe')}
-        >
-          Webcam
-        </button>
-        <button
-          className={dataSource === 'bluetooth' ? 'active' : ''}
-          onClick={() => handleSourceChange('bluetooth')}
-        >
-          Sensor
-        </button>
-        {dataSource !== 'none' && (
-          <button className="stop-btn" onClick={() => { stopAll(); setDataSource('none'); }}>
-            Stop
-          </button>
-        )}
-      </div>
-      <div className="data-bar-models">
-        {models.map(m => (
-          <span key={m.id} className="model-pill" title={`${m.format.toUpperCase()} — ${m.inputDescription || 'no input description'}`}>
-            {m.name}
-            <button className="model-pill-x" onClick={() => removeModel(m.id)}>&times;</button>
-          </span>
-        ))}
-        <button className="model-add-btn" onClick={() => setShowModelUpload(true)}>Add model</button>
-      </div>
-      <div className="data-bar-right">
-        {dataFlowing && (
+      <div className="data-bar-left" data-tour="data">
+        <span className="data-bar-title">Your data</span>
+        {loaded ? (
           <>
-            <span className="pulse" />
-            <span className="frame-count">{frameCount} frames</span>
+            <span className="csv-file" title={csvColumns.join(', ')}>
+              {dataFlowing && <span className="pulse" />}
+              <span className="csv-file-name">{csvFileName}</span>
+              <span className="csv-file-meta">
+                {csvRowCount} rows · {csvColumns.length} columns
+              </span>
+            </span>
+            <button onClick={() => fileRef.current?.click()}>Replace</button>
+            <button className="stop-btn" onClick={handleRemove}>Remove</button>
           </>
-        )}
-        {csvColumns.length > 0 && (
-          <span className="csv-cols" title={csvColumns.join(', ')}>
-            {csvColumns.length} cols{csvRowCount ? ` · ${csvRowCount} rows` : ''}
-          </span>
-        )}
-        {dataSource === 'bluetooth' && sensorName && (
-          <span className="csv-cols" title="Friendly name of the connected BLE characteristic">
-            {sensorName}
-          </span>
+        ) : (
+          <>
+            <button className="active" onClick={() => fileRef.current?.click()}>Upload CSV</button>
+            <span className="data-bar-hint">Upload your biodata as a CSV file to use it in your prototypes</span>
+          </>
         )}
       </div>
       <input ref={fileRef} type="file" accept=".csv" onChange={handleCSVFile} hidden />
-      {dataSource === 'mediapipe' && (
-        <video ref={videoRef} className="webcam-preview" autoPlay playsInline muted style={{ display: webcamReady ? 'block' : 'none' }} />
-      )}
-      {showModelUpload && <ModelUpload onClose={() => setShowModelUpload(false)} />}
-      {showSensorPicker && (
-        <SensorPicker
-          onCommit={handleSensorCommit}
-          onCancel={handleSensorCancel}
-        />
-      )}
     </div>
   );
 }
